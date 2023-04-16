@@ -1,0 +1,246 @@
+---
+title: "626_midterm1"
+author: "Shushun Ren"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+**Github repository**: <https://github.com/ranen0827/biostat626_mid1>
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Task 1: Binary classification
+
+```{r read data}
+## Task 1: Binary classification
+train_data <- read.table("training_data.txt", header=TRUE)
+test_data <- read.table("test_data.txt", header=TRUE)
+```
+
+
+```{r q1:binary classification}
+## recoding
+train_data$activity <- ifelse(train_data$activity %in% c(1,2,3),1,
+                              ifelse(train_data$activity %in% c(4,5,6), 0, 0))
+```
+
+```{r PCA1(this trunk not used)}
+## Principal component analysis (Not used eventually)
+train_data_combined <- rbind(train_data[, -c(1,2)], test_data[, -c(1)])
+features <- train_data_combined
+pca <- prcomp(features, scale. = TRUE)
+cum_var <- cumsum(pca$sdev^2/sum(pca$sdev^2))
+num_components <- which(cum_var >= 0.95)[1]
+features_pca <- as.data.frame(predict(pca, newdata = features)[,1:num_components])
+```
+
+```{r dataset split for task 1(this trunk not used)}
+## Dataset split after Principal component analysis (Not used eventually)
+train_data <- cbind(activity = train_data$activity, features_pca[1:7767,])
+train_indices <- sample(1:nrow(train_data), 0.7 * nrow(train_data))
+train_data1 <- train_data[train_indices, ]
+test_data1 <- train_data[-train_indices, ]
+## test
+test_df <- features_pca[7768:10929,]
+```
+
+```{r dataset split without PCA}
+## split the data set
+train_data <- cbind(activity = train_data$activity, train_data_combined[1:7767,])
+train_indices <- sample(1:nrow(train_data), 0.7 * nrow(train_data))
+train_data1 <- train_data[train_indices, ]
+test_data1 <- train_data[-train_indices, ]
+## test
+test_df <- train_data_combined[7768:10929,]
+```
+
+**Baseline algorithm**: Logistic regression with cross validation.
+```{r logistic regression task 1}
+## logistic regression
+library(glmnet)
+
+# feature selection using Lasso
+cv_fit <- cv.glmnet(as.matrix(train_data1[,-c(1)]), train_data1$activity, alpha = 0, family = "binomial", type.measure="class")
+best.lambda <- cv_fit$lambda.min
+
+glm.fit <- glmnet(as.matrix(train_data1[,-c(1)]), train_data1$activity, family="binomial", lambda=best.lambda)
+glm.pred <- predict(glm.fit,  newx=as.matrix(test_data1[,-c(1)]), type="response")
+glm.pred <- ifelse(glm.pred > 0.5, 1, 0)
+glm.accuracy <- mean(glm.pred == test_data1$activity)
+glm.accuracy
+```
+
+```{r LDA}
+# linear discriminant analysis
+library(MASS)
+
+# train the model
+model_lda <- lda(as.matrix(train_data1[,-c(1)]), train_data1$activity)
+lda.pred <- predict(model_lda, newdata=as.matrix(test_data1[,-c(1)]))
+lda.pred <- as.numeric(lda.pred$class) - 1
+lda.accuracy <- mean((lda.pred == 0 & test_data1$activity == 0) |
+                       (lda.pred == 1 & test_data1$activity == 1))
+lda.accuracy
+
+## test
+lda.pred <- predict(model_lda, newdata=test_df)
+lda.pred <- as.numeric(lda.pred$class) - 1
+table(lda.pred)
+```
+
+**Final algorithm**: SVM with linear kernel
+```{r SVM_l task 1}
+# SVM linear kernel
+library(caret)
+library(e1071)
+train_control <- trainControl(method = "boot", number = 5)
+train_data1$activity <- as.factor(train_data1$activity)
+test_data1$activity <- as.factor(test_data1$activity)
+model_svm_linear <- svm(activity ~ ., data = train_data1, kernel = "linear", 
+                        trControl = train_control,
+                        cost = 10)
+svm_l.pred <- predict(model_svm_linear, newdata = test_data1[,-c(1)])
+svm_l.pred <- mean(svm_l.pred == test_data1$activity)
+svm_l.pred
+
+## test
+svm_l.pred <- predict(model_svm_linear, newdata = test_df)
+table(svm_l.pred)
+output_1 <- as.numeric(svm_l.pred)-1
+write.table(output_1, "binary_4779.txt",
+            col.names = FALSE,
+            row.names = FALSE)
+```
+
+## Leaderboard scores:
+```{r}
+data.frame(Date = c("2023-04-04", "2023-04-07", "2023-04-11", "2023-04-14"),
+           Algorithm = c("PCA + Linear SVM", "PCA + Linear SVM",
+                         "Linear SVM", "Linear SVM"),
+           Accuracy = c(0.999, 0.999, 1.000, 1.000))
+```
+
+**Efforts to improve the performance**: At first, somehow it was time-consuming to run any of the algorithms other than Logistic regression and LDA on my local R, so I used PCA to reduce the dimensionality and input the 106 features into the linear SVM algorithm and got accuracy score of 0.9995 on my training set. Then I tried to adjust the hyperparameters of the linear SVM, and added 10-fold cross validation. However, nothing seems to work. Finally, I skipped the PCA and gave all the features into the model. Using the resampling methods, the accuracy was 100% finally.
+
+**Comments on the final results**: The final accuracy is 100%, which is a really great performance.
+
+# Task 2: Multi-class classification
+
+```{r 2. multi-class}
+library(caret)
+train_data <- read.table("training_data.txt", header=TRUE)
+test_data <- read.table("test_data.txt", header=TRUE)
+```
+
+```{r q2:multi-classification, echo=FALSE}
+## recoding
+train_data$activity <- ifelse(train_data$activity >= 7, 7, train_data$activity)
+train_data$activity <- as.factor(train_data$activity)
+```
+
+```{r PCA2 (this trunk not used)}
+## Principal Component Analysis (not used eventually)
+train_data_combined <- rbind(train_data[, -c(1,2)], test_data[, -c(1)])
+features <- train_data_combined
+pca <- prcomp(features, scale. = TRUE)
+cum_var <- cumsum(pca$sdev^2/sum(pca$sdev^2))
+num_components <- which(cum_var >= 0.95)[1]
+features_pca <- as.data.frame(predict(pca, newdata = features)[,1:num_components])
+```
+
+
+```{r dataset split not using PCA}
+## split the data set
+train_data <- cbind(activity = train_data$activity, train_data_combined[1:7767,])
+train_indices <- sample(1:nrow(train_data), 0.7 * nrow(train_data))
+train_data2 <- train_data[train_indices, ]
+test_data2 <- train_data[-train_indices, ]
+## test
+test_df1 <- train_data_combined[7768:10929,]
+```
+
+**Baseline Algorithm**: SVM with linear kernel
+
+```{r SVM_l for task 2}
+library(e1071)
+
+# svm for linear kernel
+train_control <- trainControl(method = "cv", number = 10)
+model_svm_linear <- svm(activity ~ ., data = train_data2, kernel = "linear", cost = 6, 
+                        trControl = train_control)
+svm_l.pred <- predict(model_svm_linear, newdata = test_data2[,-c(1)])
+svm_l.pred <- mean(svm_l.pred == test_data2$activity)
+svm_l.pred
+
+```
+
+```{r adaboost task 2}
+# Train the AdaBoost model
+library(adabag)
+ada_model <- boosting(activity ~ ., data = train_data2, boos = TRUE, mfinal = 10)
+
+# Make predictions on the test set
+ada_pred <- predict.boosting(ada_model, newdata = test_data2[,-c(1)])
+ada.pred <- mean(ada_pred$class == test_data2$activity)
+ada.pred
+```
+
+**Final Algorithm**: Radial SVM + Hyperparameter tuning
+
+```{r multi:SVM_r}
+library(caret)
+set.seed(123)
+
+# train the model - bagging
+train_control <- trainControl(method = "boot", number = 15)
+model_svm_radial <- svm(activity ~ ., data = train_data2,  kernel = "radial",  cost = 5, trControl = train_control, decision.values = TRUE)
+svm_r.pred <- predict(model_svm_radial, newdata = as.matrix(test_data2[,-c(1)]))
+svm_r.pred <- mean(svm_r.pred == test_data2$activity)
+svm_r.pred
+
+## hyperparameter tuning for svm
+set.seed(123)
+param_grid <- list(
+  C = c(0.1, 1, 10, 100),
+  kernel = c("linear", "polynomial", "radial", "sigmoid"),
+  degree = c(1, 1.5, 2, 2.5, 3, 3.5, 4),
+  gamma = c("scale", "auto", 0.1, 1, 5, 10)
+)
+ctrl <- trainControl(method = "repeatedcv", 
+                     number = 10, 
+                     repeats = 10,
+                     verboseIter = TRUE,
+                     classProbs = TRUE,
+                     summaryFunction = twoClassSummary)
+model_svm_radial <- svm(activity ~ ., data = train_data2,  kernel = "radial",  cost = 10, trControl = ctrl, tuneGrid = param_grid, preProc = c("center", "scale"),decision.values = TRUE)
+svm_r.pred <- predict(model_svm_radial, newdata = as.matrix(test_data2[,-c(1)]))
+svm_r.pred <- mean(svm_r.pred == test_data2$activity)
+svm_r.pred
+
+## test
+svm_r.pred <- predict(model_svm_radial, newdata = test_df1)
+table(svm_l.pred)
+
+output_2 <- as.numeric(svm_r.pred)
+write.table(output_2, "multiclass_4779.txt",
+            col.names = FALSE,
+            row.names = FALSE)
+```
+
+## Leaderboard scores:
+```{r}
+data.frame(Date = c("2023-04-04", "2023-04-07", "2023-04-11", "2023-04-14"),
+           Algorithm = c("PCA + Radial SVM", "PCA + Radial SVM",
+                         "PCA + Radial SVM + CV", "Radial SVM + Hyperparameter tuning"),
+           Accuracy = c(0.919, 0.919, 0.929, 0.958))
+```
+
+**Efforts to improve the performance**: Same as the binary classification, at first I used PCA before SVM with a radial kernel. I also tried AdaBoost, Random Forest, and SVM with linear kernel, but the accuracy was much lower than SVM with a radial kernel. Although the accuracy of SVM was 0.968 on my "test set", the actually accuracy on test set was only 0.919. After trying to use resampling methods and cross-validation, the accuracy didn't improve a lot. Assuming that the problem was the feature selection method, I tried other methods like random forest to select important features. However, the result was even worse. Finally, I removed the PCA and gave all features into the model, and also tried hyperparameter tuning, and most importantly, fit the model based on the whole training set (obs = 7767). The accuracy was finally 0.958, which has been significantly increased.  
+
+**Comments on the final results**: The final accuracy was 0.958, which was not the highest but has been really good compared to the performance of the baseline algorithm.
+
+**Ways to further improve the algorithm**: (1) Hyperparameters of the RBF SVM such as the regularization parameter and the gamma parameter can greatly affect the performance of the algorithm. Tuning these parameters using techniques such as grid search or randomized search can help in improving the accuracy of the RBF SVM; (2) Using ensemble methods such as bagging, boosting, and stacking can be used to improve the performance of the RBF SVM. These methods involve combining multiple RBF SVM models to make more accurate predictions. (3) Data augmentation like creating new data from the existing data by applying various transformations such as rotations, flips, and translations, can help in increasing the size of the dataset and improving the accuracy of the RBF SVM.  
+
